@@ -3,3 +3,5 @@ Flask
 numpy
 pandas
 bokeh
+dash
+plotly
