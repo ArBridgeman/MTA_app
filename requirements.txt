@@ -1,8 +1,8 @@
 gunicorn==19.9.0
-Flask
 numpy
 pandas
 dash
 dash-core-components
 dash-html-components
+dash-renderer
 plotly
