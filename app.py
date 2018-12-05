@@ -7,7 +7,7 @@ import plotly.graph_objs as go
 
 app = dash.Dash()
 
-df = pd.read_csv('worldwide_indicators_by_year.csv')
+df = pd.read_csv('data.csv')
 
 colors = {
     'background': '#111111',
