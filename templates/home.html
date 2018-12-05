@@ -16,7 +16,7 @@
     <style>
       body{
         padding-top:70px;
-        margin-left: 30px;
+        margin-left: 70px;
       }
     </style>
     <style type="text/css">  a[data-v-11b2e33f] { cursor: pointer; }
@@ -35,7 +35,7 @@
           <button type="button" class="navbar-toggle" data-toggle="collapse" data-target="#nav1">
             <span class="sr-only"> Toggle navigation</span>
           </button>
-          <span class="navbar-brand">Stock look-up app</span>
+          <span class="navbar-brand">MTA viewer</span>
           
         </div>
 
@@ -49,8 +49,8 @@
               </a>
             </li>
             <li class="nav-item">
-              <a class="nav-link" href="http://www.eoddata.com/symbols.aspx">
-                Ticker symbol lists
+              <a class="nav-link" href="http://bustime.mta.info/wiki/Developers/SIRIVehicleMonitoring">
+                MTA Bus Time
               </a>
             </li>
 
@@ -70,7 +70,7 @@
     
     <div class="col-lg-12 text-left">
       <p>
-        This page queries the <a href="https://www.quandl.com/data/WIKI-Wiki-EOD-Stock-Prices"> Quandl WIKI datasets API</a> to generate an interactive plot of the requested information.
+        This page queries the <a href="http://bustime.mta.info/wiki/Developers/SIRIVehicleMonitoring"> MTA Bus Times API</a> to generate interactive plots of the requested information.
       </p>
       <form action='/graph' method = "post">
             <p>
