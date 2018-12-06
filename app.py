@@ -148,6 +148,8 @@ def clicks(n_clicks):
                                        'MonitoredVehicleJourney_VehicleLocation_Longitude': "longitude"})
         sel_curr["timestamp"] = pd.to_datetime(sel_curr["timestamp"])
         sel_curr.to_csv("live.csv")
+        global live
+        live = sel_curr
 
         return 'Live data has been refreshed {} times'.format(n_clicks)
     else:
