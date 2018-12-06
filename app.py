@@ -30,7 +30,9 @@ app.layout = html.Div([
 
     # creating sidebar
     html.Div([
-        html.H1('MTA Bus Times',
+        html.H1(html.A('MTA Bus Times', title="Go to MTA Wiki",
+                       href="http://bustime.mta.info/wiki/Developers/Index/",
+                       style={'color': colors['header']}),
                 style={
                     'textAlign': 'center',
                     'color': colors['header'],
@@ -101,9 +103,10 @@ def get_selected_data(hours, start_date, end_date, time_div):
     sampled["hhmmss"] = sampled["timestamp"].apply(lambda x: x.time())
     sampled["hh"] = sampled["timestamp"].apply(lambda x: "%i:00" % (x.hour))
     dff = sampled.groupby("hhmmss", as_index=False).agg({"vehicle_id": 'sum',
-                                                         "hh": 'first',
-                                                         'timestamp': 'first'})
+                                                         "hh": 'first'})
+    dff["timestamp"] = dff["hhmmss"].apply(lambda x: "2015-09-12 %s" % x)
     dff = dff.sort_values("timestamp")
+    dff = dff[dff.vehicle_id > 0]
     return dff
 
 
