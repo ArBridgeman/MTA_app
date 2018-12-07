@@ -276,8 +276,8 @@ def daily_graph(dummy, hours, start_date, end_date, time_div, route_match):
                                   tickformat="%H:%M"),
                        yaxis=dict(title='Number of active vehicles',
                                   titlefont=dict(size=20),
-                                  tickfont=dict(size=15),
-                                  ))
+                                  tickfont=dict(size=15)),
+                       legend=dict(font=dict(size=15)))
 
     return {"data": [hist_trace, live_trace], 'layout': layout,
             'style': {'width': '40%', 'padding-left': '25px',
@@ -385,7 +385,7 @@ def box_plot(dummy, hours, start_date, end_date, time_div, route_match):
                 point = go.Scatter(x=[boroughs[col]],
                                    y=count,
                                    mode='markers',
-                                   name='Live data',
+                                   name=boroughs[col],
                                    showlegend=False,
                                    legendgroup=boroughs[col],
                                    marker={'size': 8})
@@ -401,8 +401,7 @@ def box_plot(dummy, hours, start_date, end_date, time_div, route_match):
                 point = go.Scatter(x=[boroughs[col]],
                                    y=[count],
                                    mode='markers',
-                                   name='Live data',
-                                   showlegend=False,
+                                   name=boroughs[col],
                                    legendgroup=boroughs[col],
                                    marker={'size': 8})
                 traces.append(point)
