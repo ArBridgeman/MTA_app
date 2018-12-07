@@ -112,7 +112,13 @@ app.layout = html.Div([
         className="six columns"),
 
     html.Div([dcc.Graph(id='time-of-day-graph'),
-              dcc.Graph(id='box-plot')],
+
+              dcc.Graph(id='box-plot', style={'padding-top': '30px'}),
+
+              html.P("Points (live data) and violins (historic data) are \
+                grouped in the legend by borough.",
+                     style={"font-size": '15', 'padding-left': '30px'})],
+
              style={'width': "75%", 'height': '800px', 'padding-left': '20px',
                     'display': 'inline-block'},
              className="six columns"
@@ -134,6 +140,7 @@ params = {"key": "19faff8a-c061-4c7e-8dc4-63685ab24123", "MaximumStopVisits": 2}
 
 
 def nyc_current():
+    """Request latests live feed"""
     resp = requests.get(
         "http://bustime.mta.info/api/siri/vehicle-monitoring.json", params=params).json()
     info = resp['Siri']['ServiceDelivery'][
@@ -145,6 +152,8 @@ def nyc_current():
     dash.dependencies.Output('button-clicks', 'children'),
     [dash.dependencies.Input('button', 'n_clicks')])
 def clicks(n_clicks):
+    """Update live data when button clicked"""
+
     if n_clicks is not None:
         current = nyc_current()
         sel_curr = current[['RecordedAtTime',
@@ -229,8 +238,9 @@ def match_routes(live_df, old_routes):
      dash.dependencies.Input("hour-slider", "value"),
      dash.dependencies.Input("date-range", 'start_date'),
      dash.dependencies.Input("date-range", 'end_date'),
-     dash.dependencies.Input("time-div", 'value')])
-def daily_graph(dummy, hours, start_date, end_date, time_div):
+     dash.dependencies.Input("time-div", 'value'),
+     dash.dependencies.Input("route-match", "value")])
+def daily_graph(dummy, hours, start_date, end_date, time_div, route_match):
     """Plot count of historic and live data as a function of time"""
 
     # ---- historic data ----
@@ -257,7 +267,7 @@ def daily_graph(dummy, hours, start_date, end_date, time_div):
 
     layout = go.Layout(title="Daily activity of vehicles",
                        titlefont=dict(size=30),
-                       height=500,
+                       height=400,
                        xaxis=dict(title='Time of day',
                                   titlefont=dict(size=20),
                                   tickangle=-45,
@@ -291,8 +301,9 @@ def create_boroughs(ddf):
      dash.dependencies.Input("hour-slider", "value"),
      dash.dependencies.Input("date-range", 'start_date'),
      dash.dependencies.Input("date-range", 'end_date'),
-     dash.dependencies.Input("time-div", 'value')])
-def box_plot(dummy, hours, start_date, end_date, time_div):
+     dash.dependencies.Input("time-div", 'value'),
+     dash.dependencies.Input("route-match", "value")])
+def box_plot(dummy, hours, start_date, end_date, time_div, route_match):
 
     boroughs = {"M": "Manhattan", "Bx": "Bronx", "B": "Brooklyn",
                 "S": "Staten Island", "Q": "Queens", "SIM": "Express to Manhattan"}
@@ -307,8 +318,37 @@ def box_plot(dummy, hours, start_date, end_date, time_div):
     live_df = pd.read_csv("live.csv", index_col=0, parse_dates=True)
     live_df = create_boroughs(live_df)
 
-    traces = []
-    shown = [False, False]
+    # obtain all historical data
+    all_df, all_routes = get_vehicle_counts(hist_df, hours, start_date,
+                                            end_date, time_div)
+    all_counts = all_df.vehicle_id / days
+
+    if route_match == 1:
+        all_live, _ = match_routes(live_df, all_routes)
+        count_live = all_live.vehicle_count.values
+    else:
+        count_live = [live_df.vehicle_id.nunique()]
+
+    #  create point and violin across all boroughs
+    traces = [{"type": 'violin',
+               "x": ["All"] * all_counts.shape[0],
+               "y": all_counts,
+               "bandwidth": 20,
+               'name': "All",
+               'legendgroup':"All",
+               "showlegend": True,
+               "box": {"visible": True},
+               "meanline": {"visible": True}},
+
+              go.Scatter(x=["All"],
+                         y=count_live,
+                         mode='markers',
+                         name='All',
+                         legendgroup="All",
+                         showlegend=False,
+                         marker={'size': 8})
+              ]
+
     for it, col in enumerate(boroughs.keys()):
         if any(hist_df[col]):
             # extracting items within certain borough
@@ -323,11 +363,11 @@ def box_plot(dummy, hours, start_date, end_date, time_div):
                       "x": [boroughs[col]] * counts.shape[0],
                       "y": counts,
                       "bandwidth": 20,
-                      'name': "2015 data",
-                      "showlegend": False if shown[0] else True,
+                      'name': boroughs[col],
+                      'legendgroup': boroughs[col],
+                      "showlegend": True,
                       "box": {"visible": True},
                       "meanline": {"visible": True}}
-            shown[0] = True
             traces.append(violin)
 
             # want to match routes in case of live data so no discrepancy's
@@ -336,15 +376,19 @@ def box_plot(dummy, hours, start_date, end_date, time_div):
                 # extracting items within certain borough
                 t_live_df = live_df[live_df[col]]
                 # ensure in same routes
-                t_live_df, _ = match_routes(t_live_df, temp_routes)
+                if route_match == 1:
+                    t_live_df, _ = match_routes(t_live_df, temp_routes)
+                    count = t_live_df.vehicle_count
+                else:
+                    count = [t_live_df.vehicle_id.nunique()]
 
                 point = go.Scatter(x=[boroughs[col]],
-                                   y=t_live_df.vehicle_count,
+                                   y=count,
                                    mode='markers',
                                    name='Live data',
-                                   showlegend=False if shown[1] else True,
+                                   showlegend=False,
+                                   legendgroup=boroughs[col],
                                    marker={'size': 8})
-                shown[1] = True
                 traces.append(point)
 
         # historic data may not include some boroughs that the live data does
@@ -358,11 +402,24 @@ def box_plot(dummy, hours, start_date, end_date, time_div):
                                    y=[count],
                                    mode='markers',
                                    name='Live data',
-                                   showlegend=False if shown[1] else True,
+                                   showlegend=False,
+                                   legendgroup=boroughs[col],
                                    marker={'size': 8})
-                shown[1] = True
                 traces.append(point)
-    return {"data": traces, "layout": {"title": ""}}
+
+    layout = go.Layout(title="Number of active vehicles per borough",
+                       titlefont=dict(size=30),
+                       height=400,
+                       xaxis=dict(title='Borough',
+                                  titlefont=dict(size=20),
+                                  tickfont=dict(size=15),
+                                  nticks=10,
+                                  tickformat="%H:%M"),
+                       yaxis=dict(title='Number of active vehicles',
+                                  titlefont=dict(size=20),
+                                  tickfont=dict(size=15)),
+                       legend=dict(font=dict(size=15)))
+    return {"data": traces, "layout": layout}
 
 if __name__ == '__main__':
     app.run_server(debug=True)
