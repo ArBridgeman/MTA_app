@@ -15,15 +15,11 @@ app = dash.Dash(__name__, external_stylesheets=external_stylesheets)
 
 # have to load data first for setting ranges, etc. in buttons
 df = pd.read_csv('data.csv', index_col=0, parse_dates=True)
-live = pd.read_csv("live.csv", index_col=0, parse_dates=True)
 
 # reformat timestamp
 timestamp = "%Y-%m-%d %H:%M:%S"
 df["timestamp"] = pd.to_datetime(df["timestamp"], format=timestamp)
 df["hour"] = df["timestamp"].dt.hour
-
-# restrict routes to those visible in historic data
-routes = df["route_id"].unique()
 
 colors = {'background': '#5369CA',
           'header': "#FFFFFF",
@@ -52,7 +48,8 @@ app.layout = html.Div([
                 html.Button('Click to refresh', id='button',
                             style={'textAlign': 'center', 'padding-left': '50px',
                                    "color": colors['header'], 'width': '80%',
-                                   "display": "inline-block"})],
+                                   "display": "inline-block"}),
+                html.P("NOTE: Refreshing takes several seconds.")],
             style={'padding-left': '20px', 'width': '90%'}
         ),
 
@@ -146,77 +143,101 @@ def clicks(n_clicks):
                                        "MonitoredVehicleJourney_PublishedLineName": "route_id",
                                        'MonitoredVehicleJourney_VehicleLocation_Latitude': "latitude",
                                        'MonitoredVehicleJourney_VehicleLocation_Longitude': "longitude"})
-        sel_curr["timestamp"] = pd.to_datetime(sel_curr["timestamp"])
-        sel_curr.to_csv("live.csv")
-        global live
-        live = sel_curr
+        # put into timestamp into EST
+        sel_curr["timestamp"] = pd.to_datetime(sel_curr["timestamp"]) - \
+            pd.Timedelta(hours=4)
 
+        sel_curr.to_csv("live.csv")
         return 'Live data has been refreshed {} times'.format(n_clicks)
     else:
         return "Using last saved version of live data."
 
 
-def get_selected_data(hours, start_date, end_date, time_div):
-    # apply start and end date criteria from date range picker
-    # and hour criteria
-    sel_mask = (df["timestamp"] >= pd.to_datetime(start_date)) & \
-        (df["timestamp"] <= pd.to_datetime(end_date)) & \
-        (df["hour"] >= hours[0]) & (df["hour"] <= hours[1])
-    sel_data = df[sel_mask].copy()
+def get_selected_data(ddf, hours, start_date, end_date, time_div):
+    """Apply start & end date and hour criteria. Returns selected dataframe"""
+    sel_mask = (ddf["timestamp"] >= pd.to_datetime(start_date)) & \
+        (ddf["timestamp"] <= pd.to_datetime(end_date)) & \
+        (ddf["hour"] >= hours[0]) & (ddf["hour"] <= hours[1])
+    sel_data = ddf[sel_mask].copy()
+
+    routes = sel_data["route_id"].unique()
+
+    return sel_data, routes
+
+
+def get_vehicle_counts(ddf, hours, start_date, end_date, time_div):
+    """Obtain vehicle counts from historic data in specified time intervals"""
+    sel_data, routes = get_selected_data(ddf, hours, start_date, end_date,
+                                         time_div)
 
     # want to only count unique vehicle ids in the time window with
     sampled = sel_data.resample("%sMin" % time_div,
-                                on="timestamp").agg({"vehicle_id": "nunique",
-                                                     "route_id": "first"})
+                                on="timestamp").agg({"vehicle_id": "nunique"})
     # easiest way to return to a pandas dataframe
     sampled = sampled.reset_index()
 
     # create hour for groupby
     sampled["hhmmss"] = sampled["timestamp"].apply(lambda x: x.time())
     sampled["hh"] = sampled["timestamp"].apply(lambda x: "%i:00" % (x.hour))
-    dff = sampled.groupby("hhmmss", as_index=False).agg({"vehicle_id": 'sum',
-                                                         "hh": 'first',
-                                                         "route_id": 'first'})
-    dff["timestamp"] = dff["hhmmss"].apply(lambda x: "2015-09-12 %s" % x)
-    dff = dff.sort_values("timestamp")
-    dff = dff[dff.vehicle_id > 0]
+    data = sampled.groupby("hhmmss", as_index=False).agg({"vehicle_id": 'sum',
+                                                          "hh": 'first'})
+    data["timestamp"] = data["hhmmss"].apply(lambda x: "2015-09-12 %s" % x)
+    data = data.sort_values("timestamp")
+    data = data[data.vehicle_id > 0]
 
-    # match routes from historic data in live
-    sel_mask = (live.route_id.isin(routes))
-    sel_live = live[sel_mask].copy()
+    return data, routes
+
+
+def match_routes(live_df, old_routes):
+    """Match routes of live data with historic, as routes may have been
+    added since then."""
+
+    sel_mask = (live_df.route_id.isin(old_routes))
+    sel_live = live_df[sel_mask].copy()
     # live sample will always be short (~3 min so no resampling)
     min_time = pd.to_datetime(sel_live.timestamp.min())
     max_time = pd.to_datetime(sel_live.timestamp.max())
+
     duration = ((max_time - min_time).seconds) // 60
     count = sel_live.vehicle_id.nunique()
     time = "2015-09-12 %s:00" % pd.to_datetime(min_time).hour
-    d = {'timestamp': [time], 'vehicle_id': [count]}
+    d = {'timestamp': [time], 'vehicle_count': [count]}
     curr = pd.DataFrame(data=d)
 
-    return dff, curr, duration
+    return curr, duration
 
 
 @app.callback(
     dash.dependencies.Output('time-of-day-graph', "figure"),
-    [dash.dependencies.Input("hour-slider", "value"),
+    [dash.dependencies.Input('button-clicks', 'children'),
+     dash.dependencies.Input("hour-slider", "value"),
      dash.dependencies.Input("date-range", 'start_date'),
      dash.dependencies.Input("date-range", 'end_date'),
      dash.dependencies.Input("time-div", 'value')])
-def daily_graph(hours, start_date, end_date, time_div):
-    dff, curr, dur = get_selected_data(hours, start_date, end_date, time_div)
+def daily_graph(dummy, hours, start_date, end_date, time_div):
+    """Plot count of historic and live data as a function of time"""
 
+    # ---- historic data ----
+    hist_df, hist_routes = get_vehicle_counts(df, hours, start_date, end_date,
+                                              time_div)
     days = (pd.to_datetime(end_date) - pd.to_datetime(start_date)).days
-    trace = go.Scatter(x=dff["timestamp"].astype(str),
-                       y=dff["vehicle_id"] / days,
-                       mode='markers+lines',
-                       name='2015 data: %i min' % time_div,
-                       marker={'size': 8})
 
-    trace1 = go.Scatter(x=curr["timestamp"].astype(str),
-                        y=curr["vehicle_id"],
-                        mode='markers+lines',
-                        name='Live data: %i min' % dur,
-                        marker={'size': 8})
+    hist_trace = go.Scatter(x=hist_df["timestamp"].astype(str),
+                            y=hist_df["vehicle_id"] / days,
+                            mode='markers+lines',
+                            name='2015 data: %i min' % time_div,
+                            marker={'size': 8})
+
+    # ---- live data ----
+    live = pd.read_csv("live.csv", index_col=0, parse_dates=True)
+
+    live_df, dur = match_routes(live, hist_routes)
+
+    live_trace = go.Scatter(x=live_df["timestamp"].astype(str),
+                            y=live_df["vehicle_count"],
+                            mode='markers+lines',
+                            name='Live data: %i min' % dur,
+                            marker={'size': 8})
 
     layout = go.Layout(title="Daily activity of vehicles",
                        titlefont=dict(size=30),
@@ -232,7 +253,7 @@ def daily_graph(hours, start_date, end_date, time_div):
                                   tickfont=dict(size=15),
                                   ))
 
-    return {"data": [trace, trace1], 'layout': layout,
+    return {"data": [hist_trace, live_trace], 'layout': layout,
             'style': {'width': '40%', 'padding-left': '25px',
                       'display': 'inline-block'}}
 
@@ -250,65 +271,82 @@ def create_boroughs(ddf):
 
 @app.callback(
     dash.dependencies.Output('box-plot', "figure"),
-    [dash.dependencies.Input("hour-slider", "value"),
+    [dash.dependencies.Input('button-clicks', 'children'),
+     dash.dependencies.Input("hour-slider", "value"),
      dash.dependencies.Input("date-range", 'start_date'),
      dash.dependencies.Input("date-range", 'end_date'),
      dash.dependencies.Input("time-div", 'value')])
-def box_plot(hours, start_date, end_date, time_div):
+def box_plot(dummy, hours, start_date, end_date, time_div):
 
     boroughs = {"M": "Manhattan", "Bx": "Bronx", "B": "Brooklyn",
                 "S": "Staten Island", "Q": "Queens", "SIM": "Express to Manhattan"}
 
-    dff, _, _ = get_selected_data(hours, start_date, end_date, time_div)
-    dff = create_boroughs(dff)
-
-    curr = create_boroughs(live)
-
+    # load historical data and add borough booleans
+    hist_df, hist_routes = get_selected_data(df, hours, start_date, end_date,
+                                             time_div)
     days = (pd.to_datetime(end_date) - pd.to_datetime(start_date)).days
+    hist_df = create_boroughs(hist_df)
+
+    # load live data and add borough booleans
+    live_df = pd.read_csv("live.csv", index_col=0, parse_dates=True)
+    live_df = create_boroughs(live_df)
 
     traces = []
     shown = [False, False]
-    for it, col in enumerate(["M", "S", "Bx", "Q", "B", "SIM"]):
-        if any(dff[col]):
-            temp = dff[dff[col]].vehicle_id / days
-            trace = {"type": 'violin',
-                     "x": [boroughs[col]] * temp.shape[0],
-                     "y": temp,
-                     "bandwidth": 20,
-                     'name': "2015 data",
-                     "showlegend": False if shown[0] else True,
-                     "box": {"visible": True},
-                     "meanline": {"visible": True}}
+    for it, col in enumerate(boroughs.keys()):
+        if any(hist_df[col]):
+            # extracting items within certain borough
+            t_hist_df = hist_df[hist_df[col]]
+            # getting counts with specified time division and criteria
+            temp_df, temp_routes = get_vehicle_counts(t_hist_df, hours,
+                                                      start_date, end_date,
+                                                      time_div)
+
+            counts = temp_df.vehicle_id / days
+            violin = {"type": 'violin',
+                      "x": [boroughs[col]] * counts.shape[0],
+                      "y": counts,
+                      "bandwidth": 20,
+                      'name': "2015 data",
+                      "showlegend": False if shown[0] else True,
+                      "box": {"visible": True},
+                      "meanline": {"visible": True}}
             shown[0] = True
-            traces.append(trace)
+            traces.append(violin)
 
-            if any(curr[col]):
-                routes2 = dff[dff[col]].route_id.unique()
-                temp = curr[curr[col]]
-                mask = (temp.route_id.isin(routes2))
-                count = temp[mask].vehicle_id.nunique()
+            # want to match routes in case of live data so no discrepancy's
+            # other than increase service within those routes
+            if any(live_df[col]):
+                # extracting items within certain borough
+                t_live_df = live_df[live_df[col]]
+                # ensure in same routes
+                t_live_df, _ = match_routes(t_live_df, temp_routes)
 
-                trace = go.Scatter(x=[boroughs[col]],
-                                   y=[count],
+                point = go.Scatter(x=[boroughs[col]],
+                                   y=t_live_df.vehicle_count,
                                    mode='markers',
                                    name='Live data',
                                    showlegend=False if shown[1] else True,
                                    marker={'size': 8})
                 shown[1] = True
-                traces.append(trace)
+                traces.append(point)
+
+        # historic data may not include some boroughs that the live data does
         else:
-            if any(curr[col]):
-                count = curr[curr[col]].vehicle_id.nunique()
-                trace = go.Scatter(x=[boroughs[col]],
+            if any(live_df[col]):
+                # extracting items within certain borough
+                t_live_df = live_df[live_df[col]]
+                count = t_live_df.vehicle_id.nunique()
+
+                point = go.Scatter(x=[boroughs[col]],
                                    y=[count],
                                    mode='markers',
                                    name='Live data',
                                    showlegend=False if shown[1] else True,
                                    marker={'size': 8})
                 shown[1] = True
-                traces.append(trace)
-    return {"data": traces, "layout": {"title": "",
-                                       "violinmode": "group"}}
+                traces.append(point)
+    return {"data": traces, "layout": {"title": ""}}
     # temp =
     # xs.append()
     # ys.append(temp)
