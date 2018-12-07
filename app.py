@@ -45,11 +45,14 @@ app.layout = html.Div([
 
         html.Div(
             [html.P(id='button-clicks'),
+
                 html.Button('Click to refresh', id='button',
                             style={'textAlign': 'center', 'padding-left': '50px',
                                    "color": colors['header'], 'width': '80%',
                                    "display": "inline-block"}),
-                html.P("NOTE: Refreshing takes several seconds.")],
+
+                html.P("NOTE: Refreshing takes several seconds.",
+                       style={"font-size": '10', 'padding-top': '10px'})],
             style={'padding-left': '20px', 'width': '90%'}
         ),
 
@@ -66,6 +69,7 @@ app.layout = html.Div([
             ), style={'padding-left': '20px', 'width': '90%'}
         ),
 
+        # ---- time range for historical data ----
         html.H5("Hour range",
                 style={'padding-top': '25px', 'padding-left': '20px'}),
         html.Div(
@@ -76,23 +80,35 @@ app.layout = html.Div([
                 value=[0, 24],
                 allowCross=False,
                 marks={str(h): {'label': str(h),
-                                'style': {'color': colors["header"]}} for h in np.arange(0, 24, 4)}
-            ), style={'width': '90%', 'padding-left': '20px',
-                      "color": colors['header']}),
+                                'style': {'color': colors["header"]}} for h in np.arange(0, 24, 4)}),
+            style={'width': '90%', 'padding-left': '20px', "color": colors['header']}),
 
+        # ---- how to group historical data ----
         html.H5("Minutes to group data in",
                 style={'padding-top': '40px', 'padding-left': '20px'}),
-        dcc.RadioItems(
-            id="time-div",
-            options=[{'label': '15', 'value': 15},
-                     {'label': '30', 'value': 30},
-                     {'label': '45', 'value': 45},
-                     {'label': '60', 'value': 60}],
-            value=15, labelStyle={'display': 'inline-block', 'width': '32px'},
-            style={'padding-left': '20px'})
+        dcc.RadioItems(id="time-div",
+                       options=[{'label': '15', 'value': 15},
+                                {'label': '30', 'value': 30},
+                                {'label': '45', 'value': 45},
+                                {'label': '60', 'value': 60}],
+                       value=15, style={'padding-left': '20px'},
+                       labelStyle={'display': 'inline-block', 'width': '32px'}),
 
-    ], style={'color': colors["header"], 'backgroundColor': colors['text'],
-              'width': '20%', 'height':'100vh'},
+
+        # ---- route related elements ----
+        html.H5("Match routes within a Borough",
+                style={'padding-top': '20px', 'padding-left': '20px'}),
+
+        html.P("May be mis-match between datasets due to changes to routes",
+               style={"font-size": '10', 'padding-left': '20px'}),
+
+        dcc.RadioItems(id="route-match",
+                       options=[{'label': 'yes', 'value': 1},
+                                {'label': 'no', 'value': 0}],
+                       value=1, style={'padding-left': '20px'},
+                       labelStyle={'display': 'inline-block', 'width': '32px'})],
+        style={'color': colors["header"], 'backgroundColor': colors['text'],
+               'width': '20%', 'height':'100vh'},
         className="six columns"),
 
     html.Div([dcc.Graph(id='time-of-day-graph'),
@@ -347,49 +363,6 @@ def box_plot(dummy, hours, start_date, end_date, time_div):
                 shown[1] = True
                 traces.append(point)
     return {"data": traces, "layout": {"title": ""}}
-    # temp =
-    # xs.append()
-    # ys.append(temp)
-    # print("ok")
-
-    # group_curr = curr.groupby()
-    # print(sum(curr.M.astype(int)))
-
-    # boxes = []
-
-    # print("ok")
-    # dff, curr, dur = get_selected_data(hours, start_date, end_date, time_div)
-
-    # days = (pd.to_datetime(end_date) - pd.to_datetime(start_date)).days
-    # trace = go.Scatter(x=dff["timestamp"].astype(str),
-    #                    y=dff["vehicle_id"] / days,
-    #                    mode='markers+lines',
-    #                    name='2015 data: %i min' % time_div,
-    #                    marker={'size': 8})
-
-    # trace1 = go.Scatter(x=curr["timestamp"].astype(str),
-    #                     y=curr["vehicle_id"],
-    #                     mode='markers+lines',
-    #                     name='Live data: %i min' % dur,
-    #                     marker={'size': 8})
-
-    # layout = go.Layout(title="Daily activity of vehicles",
-    #                    titlefont=dict(size=30),
-    #                    xaxis=dict(title='Time of day',
-    #                               titlefont=dict(size=20),
-    #                               tickangle=-45,
-    #                               tickfont=dict(size=15),
-    #                               nticks=10,
-    #                               tickformat="%H:%M"),
-    #                    yaxis=dict(title='Number of active vehicles',
-    #                               titlefont=dict(size=20),
-    #                               tickfont=dict(size=15),
-    #                               ))
-
-    # return {"data": [trace, trace1], 'layout': layout,
-    #         'style': {'width': '40%', 'padding-left': '25px',
-    #                   'display': 'inline-block'}}
-
 
 if __name__ == '__main__':
     app.run_server(debug=True)
