@@ -4,7 +4,9 @@ import dash_core_components as dcc
 import dash_html_components as html
 
 import base64
-import matplotlib
+# import matplotlib
+import datetime
+import json  # needed implicitly
 from matplotlib import cm
 import numpy as np
 import pandas as pd
@@ -137,7 +139,7 @@ app.layout = html.Div([
                        value=1, style={'padding-left': '20px'},
                        labelStyle={'display': 'inline-block', 'width': '32px'})],
         style={'color': colors["header"], 'backgroundColor': colors['text'],
-               'width': '20%', 'height':'100vh'},
+               'width': '20%', 'height':'100vh', 'position': 'fixed'},
         className="six columns"),
 
     html.Div([dcc.Graph(id='time-of-day-graph'),
@@ -149,23 +151,30 @@ app.layout = html.Div([
                      style={"font-size": '15', 'padding-left': '30px'}),
 
               html.Div([
-                  html.Div([dcc.Graph(animate=True, id='graph-1')],
-                           style={'width': "75%"}),
+                  html.Div([dcc.Graph(id='graph-1')],
+                           style={'textAlign': 'center', 'padding-top': '30px'}),
 
-                  dcc.RangeSlider(id="show-me",
-                                  min=0,
-                                  max=24,
-                                  value=[0, 24],
-                                  allowCross=False,
-                                  marks={str(h): {'label': str(h)}
-                                         for h in np.arange(0, 24, 4)})],
-                       className="six columns")
+                  html.Div(dcc.Slider(id="show-me",
+                                      min=0,
+                                      max=24,
+                                      value=0,
+                                      marks={str(h): {'label': "%s:00" % h} for h in np.arange(0, 24, 1)}),
+                           style={'textAlign': 'center', 'width': "85%"})
+              ], style={'textAlign': 'center'})
               ],
-             style={'width': "75%", 'display': 'inline-block',
-                    'textAlign': 'center', 'padding-right': '30px'},
+             style={'width': "95%", 'display': 'inline-block',
+                    'textAlign': 'center', 'padding-left': '21%'},
              className="six columns"
              )
 ])
+
+
+@app.callback(
+    dash.dependencies.Output("show-me", "step"),
+    [dash.dependencies.Input("time-div", 'value')])
+def redo_slider(time_div):
+    """Change size of step in show-me slider"""
+    return time_div / 60
 
 
 def _flatten_dict(root_key, nested_dict, flattened_dict):
@@ -524,19 +533,7 @@ def location_data():
     # creating easy objects to access for creating animated heatmap
     groups = group_hh.groupby("hhmmss")
 
-    title = []
-    xs = []
-    ys = []
-    zs = []
-    for name, group in groups:
-        mask = group.vehicle_id > 0
-        temp = group[mask]
-
-        xs.append(temp.longs)
-        ys.append(temp.lats)
-        zs.append(temp.vehicle_id)
-        title.append(name)
-    return xs, ys, zs, title
+    return groups, group_hh.vehicle_id.max()
 
 
 def matplotlib_to_plotly(cmap, pl_entries):
@@ -549,29 +546,36 @@ def matplotlib_to_plotly(cmap, pl_entries):
 
     return pl_colorscale
 
+# getting color map
+viridis_cmap = cm.get_cmap('viridis')
+viridis = matplotlib_to_plotly(viridis_cmap, 255)
+# reset last one to be transparent
+viridis[-1] = [1.0, 'rgba(68, 1, 84, 0)']
 
-def location_trace(values):
-    xs, ys, zs, title = location_data()
 
-    viridis_cmap = cm.get_cmap('viridis')
-    viridis = matplotlib_to_plotly(viridis_cmap, 255)
-    # reset last one to be transparent
-    viridis[-1] = [1.0, 'rgba(68, 1, 84, 0)']
-    print(values)
-    print(title)
+def location_trace(value):
+    group, max_val = location_data()
 
-    data_plot = [dict(type='scatter',
-                      x=xs[0],
-                      y=ys[0],
-                      mode="markers"
-                      # z=zs[0],
-                      # zmin=2,
-                      # zmax=30,
-                      # opacity=0.7,
-                      # zsmooth='best',
-                      # colorbar=dict(thickness=20, ticklen=4),
-                      # colorscale=viridis,
-                      # reversescale=True
+    get_time = value.split(".")
+    if len(get_time) == 1:
+        key = datetime.time(int(get_time[0]), 0)
+    else:
+        key = datetime.time(int(get_time[0]), int(
+            float("0." + get_time[1]) * 60))
+
+    sel = group.get_group(key)
+
+    data_plot = [dict(type='heatmap',
+                      x=sel.longs,
+                      y=sel.lats,
+                      z=sel.vehicle_id,
+                      zmin=2,
+                      zmax=max_val,
+                      opacity=0.5,
+                      zsmooth='best',
+                      colorbar=dict(thickness=20, ticklen=4),
+                      colorscale=viridis,
+                      reversescale=True
                       )]
 
     return data_plot
@@ -580,9 +584,10 @@ def location_trace(values):
 @app.callback(
     dash.dependencies.Output('graph-1', 'figure'),
     [dash.dependencies.Input('show-me', 'value')])
-def update_graph_1(values):
+def update_graph_1(value):
 
     layout = dict(title="Daily activity of vehicles",
+                  titlefont=dict(size=30),
                   xaxis=dict(range=[-74.30, -73.50], showticklabels=False),
                   yaxis=dict(range=[40.5, 40.95], showticklabels=False),
                   images=[dict(
@@ -602,7 +607,7 @@ def update_graph_1(values):
                   height=851
                   )
 
-    return {'data': location_trace(values), 'layout': layout}
+    return {'data': location_trace(str(value)), 'layout': layout}
 
 if __name__ == '__main__':
     # create iterator
