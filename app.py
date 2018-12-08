@@ -3,6 +3,9 @@ import dash
 import dash_core_components as dcc
 import dash_html_components as html
 
+import base64
+import matplotlib
+from matplotlib import cm
 import numpy as np
 import pandas as pd
 import plotly.graph_objs as go
@@ -32,7 +35,9 @@ colors = {'background': '#5369CA',
           'header': "#FFFFFF",
           'text': '#000000'}
 
-app = dash.Dash(__name__, external_stylesheets=external_stylesheets)
+# start application
+app = dash.Dash(__name__, static_folder='static',
+                external_stylesheets=external_stylesheets)
 server = app.server
 
 # have to load data first for setting ranges, etc. in buttons
@@ -43,6 +48,9 @@ df = create_boroughs(df)
 timestamp = "%Y-%m-%d %H:%M:%S"
 df["timestamp"] = pd.to_datetime(df["timestamp"], format=timestamp)
 df["hour"] = df["timestamp"].dt.hour
+
+
+encoded_image = base64.b64encode(open("openstreetmap_nyc.png", 'rb').read())
 
 
 app.layout = html.Div([
@@ -138,8 +146,21 @@ app.layout = html.Div([
 
               html.P("Points (live data) and violins (historic data) are \
                 grouped in the legend by borough.",
-                     style={"font-size": '15', 'padding-left': '30px'})],
+                     style={"font-size": '15', 'padding-left': '30px'}),
 
+              html.Div([
+                  html.Div([dcc.Graph(animate=True, id='graph-1')],
+                           style={'width': "75%"}),
+
+                  dcc.RangeSlider(id="show-me",
+                                  min=0,
+                                  max=24,
+                                  value=[0, 24],
+                                  allowCross=False,
+                                  marks={str(h): {'label': str(h)}
+                                         for h in np.arange(0, 24, 4)})],
+                       className="six columns")
+              ],
              style={'width': "75%", 'display': 'inline-block',
                     'textAlign': 'center', 'padding-right': '30px'},
              className="six columns"
@@ -471,5 +492,118 @@ def violin_plot(dummy, hours, start_date, end_date, time_div, route_match):
                        hovermode='closest')
     return {"data": traces, "layout": layout}
 
+
+def location_data():
+    """Load and processs location data"""
+
+    # --- load datasets ----
+    # historic data
+    hist_df = df.copy()
+
+    hist = hist_df.set_index("timestamp")
+
+    # create binned versions of latitude and longitude
+    hist["lats"] = pd.cut(hist.latitude, 15)
+    hist["longs"] = pd.cut(hist.longitude, 10)
+
+    # use grouper with timestamp index instead of resampler as can
+    # couple with latitutde and longitude from before
+    # get count of vehicles per day
+    group = hist.groupby([pd.Grouper(freq='15Min'), "lats", "longs"]).agg(
+        {"vehicle_id": "nunique"})
+    group = group.reset_index()
+
+    group["hhmmss"] = group["timestamp"].apply(lambda x: x.time())
+    # now group by time and take mean of vehicle count across days
+    group_hh = group.groupby(["hhmmss", "lats", "longs"], as_index=False).agg(
+        {"vehicle_id": 'mean'})
+    # get midpoints of lat and longs for heatmap
+    group_hh["lats"] = group_hh.lats.apply(lambda x: x.mid)
+    group_hh["longs"] = group_hh.longs.apply(lambda x: x.mid)
+
+    # creating easy objects to access for creating animated heatmap
+    groups = group_hh.groupby("hhmmss")
+
+    title = []
+    xs = []
+    ys = []
+    zs = []
+    for name, group in groups:
+        mask = group.vehicle_id > 0
+        temp = group[mask]
+
+        xs.append(temp.longs)
+        ys.append(temp.lats)
+        zs.append(temp.vehicle_id)
+        title.append(name)
+    return xs, ys, zs, title
+
+
+def matplotlib_to_plotly(cmap, pl_entries):
+    h = 1.0 / (pl_entries - 1)
+    pl_colorscale = []
+
+    for k in range(pl_entries):
+        C = list(map(np.uint8, np.array(cmap(k * h)[:3]) * 255))
+        pl_colorscale.append([k * h, 'rgb' + str((C[0], C[1], C[2]))])
+
+    return pl_colorscale
+
+
+def location_trace(values):
+    xs, ys, zs, title = location_data()
+
+    viridis_cmap = cm.get_cmap('viridis')
+    viridis = matplotlib_to_plotly(viridis_cmap, 255)
+    # reset last one to be transparent
+    viridis[-1] = [1.0, 'rgba(68, 1, 84, 0)']
+    print(values)
+    print(title)
+
+    data_plot = [dict(type='scatter',
+                      x=xs[0],
+                      y=ys[0],
+                      mode="markers"
+                      # z=zs[0],
+                      # zmin=2,
+                      # zmax=30,
+                      # opacity=0.7,
+                      # zsmooth='best',
+                      # colorbar=dict(thickness=20, ticklen=4),
+                      # colorscale=viridis,
+                      # reversescale=True
+                      )]
+
+    return data_plot
+
+
+@app.callback(
+    dash.dependencies.Output('graph-1', 'figure'),
+    [dash.dependencies.Input('show-me', 'value')])
+def update_graph_1(values):
+
+    layout = dict(title="Daily activity of vehicles",
+                  xaxis=dict(range=[-74.30, -73.50], showticklabels=False),
+                  yaxis=dict(range=[40.5, 40.95], showticklabels=False),
+                  images=[dict(
+                      source='data:image/png;base64,{}'.format(
+                          encoded_image.decode()),
+                      xref="x",
+                      yref="y",
+                      x=-74.30,
+                      y=40.95,
+                      sizex=0.8,
+                      sizey=0.45,
+                      sizing="stretch",
+                      layer="below")],
+                  hovermode='closest',
+                  showlegend=False,
+                  width=1156,
+                  height=851
+                  )
+
+    return {'data': location_trace(values), 'layout': layout}
+
 if __name__ == '__main__':
+    # create iterator
     app.run_server(debug=True)
