@@ -144,17 +144,18 @@ app.layout = html.Div([
               #             grouped in the legend by borough.",
               # style={"font-size": '15', 'padding-left': '30px'}),
 
-              #           html.Div([
-              #               html.Div([dcc.Graph(id='graph-1')],
-              # style={'textAlign': 'center', 'padding-top': '30px'}),
+              html.Div([
+                  #               html.Div([dcc.Graph(id='graph-1')],
+                  # style={'textAlign': 'center', 'padding-top':
+                  # '30px'}),
 
-              #               html.Div(dcc.Slider(id="show-me",
-              #                                   min=0,
-              #                                   max=24,
-              #                                   value=0,
-              #                                   marks={str(h): {'label': "%s:00" % h} for h in np.arange(0, 24, 1)}),
-              # style={'textAlign': 'center', 'width': "85%"})],
-              # style={'textAlign': 'center'})
+                  html.Div(dcc.Slider(id="show-me",
+                                      min=0,
+                                      max=24,
+                                      value=0,
+                                      marks={str(h): {'label': "%s:00" % h} for h in np.arange(0, 24, 1)}),
+                           style={'textAlign': 'center', 'width': "85%"})],
+                       style={'textAlign': 'center'})
               ],
              style={'width': "95%", 'display': 'inline-block',
                     'textAlign': 'center', 'padding-left': '21%'},
@@ -218,6 +219,15 @@ def clicks(n_clicks):
     else:
         return "Using last saved version of live data."
 
+
+# ---- used to generate or directly modify plots ----
+
+@app.callback(
+    dash.dependencies.Output("show-me", "step"),
+    [dash.dependencies.Input("time-div", 'value')])
+def redo_slider(time_div):
+    """Change size of step in show-me slider"""
+    return time_div / 60
 
 if __name__ == '__main__':
     # create iterator
