@@ -505,6 +505,24 @@ def violin_plot(dummy, hours, start_date, end_date, time_div, route_match):
     return {"data": traces, "layout": layout}
 
 
+def matplotlib_to_plotly(cmap, pl_entries):
+    """Convert matplotlib colormap to plotly version"""
+    h = 1.0 / (pl_entries - 1)
+    pl_colorscale = []
+
+    for k in range(pl_entries):
+        C = list(map(np.uint8, np.array(cmap(k * h)[:3]) * 255))
+        pl_colorscale.append([k * h, 'rgb' + str((C[0], C[1], C[2]))])
+
+    return pl_colorscale
+
+# getting color map
+viridis_cmap = cm.get_cmap('viridis')
+viridis = matplotlib_to_plotly(viridis_cmap, 255)
+# reset last one to be transparent
+viridis[-1] = [1.0, 'rgba(68, 1, 84, 0)']
+
+
 if __name__ == '__main__':
     # create iterator
     app.run_server(debug=True)
