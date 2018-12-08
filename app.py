@@ -138,7 +138,7 @@ app.layout = html.Div([
 
     html.Div([dcc.Graph(id='time-of-day-graph'),
 
-              # dcc.Graph(id='violin-plot', style={'padding-top': '30px'}),
+              dcc.Graph(id='violin-plot', style={'padding-top': '30px'}),
 
               #           html.P("Points (live data) and violins (historic data) are \
               #             grouped in the legend by borough.",
@@ -220,6 +220,69 @@ def clicks(n_clicks):
         return "Using last saved version of live data."
 
 
+def aggregate_live(live_ddf):
+    """Return aggregated values for plotting live data"""
+
+    # live sample will always be short (~3 min so no resampling)
+    min_time = pd.to_datetime(live_ddf.timestamp.min())
+    max_time = pd.to_datetime(live_ddf.timestamp.max())
+
+    duration = ((max_time - min_time).seconds) // 60
+    count = live_ddf.vehicle_id.nunique()
+    time = "2015-09-12 %s:00" % pd.to_datetime(min_time).hour
+
+    return time, count, duration
+
+
+def match_routes(live_ddf, old_routes):
+    """Match routes of live data with historic, as routes may have been
+    added since then."""
+
+    sel_mask = (live_ddf.route_id.isin(old_routes))
+    sel_live = live_ddf[sel_mask].copy()
+
+    return aggregate_live(sel_live)
+
+
+# ---- used to process historic data ----
+
+
+def get_selected_data(ddf, hours, start_date, end_date, time_div):
+    """Apply start & end date and hour criteria. Returns selected dataframe"""
+    sel_mask = (ddf["timestamp"] >= pd.to_datetime(start_date)) & \
+        (ddf["timestamp"] <= pd.to_datetime(end_date)) & \
+        (ddf["hour"] >= hours[0]) & (ddf["hour"] <= hours[1])
+    sel_data = ddf[sel_mask].copy()
+
+    routes = sel_data["route_id"].unique()
+
+    return sel_data, routes
+
+
+def get_vehicle_counts(ddf, hours, start_date, end_date, time_div):
+    """Obtain vehicle counts from historic data in specified time intervals"""
+    sel_data, routes = get_selected_data(ddf, hours, start_date, end_date,
+                                         time_div)
+
+    # want to only count unique vehicle ids in the time window with
+    sampled = sel_data.resample("%sMin" % time_div,
+                                on="timestamp").agg({"vehicle_id": "nunique"})
+    # easiest way to return to a pandas dataframe
+    sampled = sampled.reset_index()
+
+    # create hour for groupby
+    sampled["hhmmss"] = sampled["timestamp"].apply(lambda x: x.time())
+    sampled["hh"] = sampled["timestamp"].apply(lambda x: "%i:00" % (x.hour))
+    data = sampled.groupby("hhmmss", as_index=False).agg({"vehicle_id": 'sum',
+                                                          "hh": 'first'})
+    data = data.rename(index=str, columns={"vehicle_id": "vehicle_count"})
+    data["timestamp"] = data["hhmmss"].apply(lambda x: "2015-09-12 %s" % x)
+    data = data.sort_values("timestamp")
+    data = data[data.vehicle_count > 0]
+
+    return data, routes
+
+
 # ---- used to generate or directly modify plots ----
 
 @app.callback(
@@ -228,6 +291,219 @@ def clicks(n_clicks):
 def redo_slider(time_div):
     """Change size of step in show-me slider"""
     return time_div / 60
+
+
+@app.callback(
+    dash.dependencies.Output('time-of-day-graph', "figure"),
+    [dash.dependencies.Input('button-clicks', 'children'),
+     dash.dependencies.Input("hour-slider", "value"),
+     dash.dependencies.Input("date-range", 'start_date'),
+     dash.dependencies.Input("date-range", 'end_date'),
+     dash.dependencies.Input("time-div", 'value'),
+     dash.dependencies.Input("route-match", "value"),
+     dash.dependencies.Input('violin-plot', 'hoverData')])
+def daily_graph(d, hours, start_date, end_date, time_div, route_match, borough):
+    """Plot count of historic and live data as a function of time"""
+
+    # --- load datasets ----
+    # historic data
+    hist_df = df.copy()
+    # live data
+    live_df = pd.read_csv("live.csv", index_col=0, parse_dates=True)
+
+    # --- obtain hover item from violin plot---
+    if borough is not None:
+        key = borough["points"][0]["x"]
+    else:
+        key = "All"
+
+    # if not all, then need to select specific borough to plot
+    hist_plot = False
+    live_plot = False
+
+    if key != "All":
+        if any(hist_df[inv_dic_borough[key]]):
+            hist_df = hist_df[hist_df[inv_dic_borough[key]]]
+            hist_plot = True
+        if any(live_df[inv_dic_borough[key]]):
+            live_df = live_df[live_df[inv_dic_borough[key]]]
+            live_plot = True
+        title = key
+    else:
+        title = "all boroughs of NYC"
+        hist_plot = True
+        live_plot = True
+
+    traces = []
+
+    # ---- perform time selection on historic data and plot----
+    hist_routes = []
+    if hist_plot:
+        hist_df, hist_routes = get_vehicle_counts(hist_df, hours, start_date,
+                                                  end_date, time_div)
+        days = (pd.to_datetime(end_date) - pd.to_datetime(start_date)).days
+
+        hist_trace = go.Scatter(x=hist_df["timestamp"].astype(str),
+                                y=hist_df["vehicle_count"] / days,
+                                mode='markers+lines',
+                                name='historic data: %i min' % time_div,
+                                marker={'size': 8})
+        traces.append(hist_trace)
+
+    # ---- live data match route data of historic (if specified) and plot ----
+    if live_plot:
+        if route_match == 1 and len(hist_routes) > 0:
+            time, count, dur = match_routes(live_df, hist_routes)
+        else:
+            time, count, dur = aggregate_live(live_df)
+
+        live_trace = go.Scatter(x=[str(time)],
+                                y=[count],
+                                mode='markers+lines',
+                                name='live data: %i min' % dur,
+                                marker={'size': 8})
+
+        traces.append(live_trace)
+
+    layout = go.Layout(title="Daily activity of vehicles in %s" % title,
+                       titlefont=dict(size=30),
+                       height=400,
+                       xaxis=dict(title='Time of day',
+                                  titlefont=dict(size=20),
+                                  tickangle=-45,
+                                  tickfont=dict(size=15),
+                                  nticks=10,
+                                  tickformat="%H:%M"),
+                       yaxis=dict(title='Number of active vehicles',
+                                  titlefont=dict(size=20),
+                                  tickfont=dict(size=15)),
+                       legend=dict(font=dict(size=15)))
+
+    return {"data": traces, 'layout': layout,
+            'style': {'width': '40%', 'padding-left': '25px',
+                      'display': 'inline-block'}}
+
+
+@app.callback(
+    dash.dependencies.Output('violin-plot', "figure"),
+    [dash.dependencies.Input('button-clicks', 'children'),
+     dash.dependencies.Input("hour-slider", "value"),
+     dash.dependencies.Input("date-range", 'start_date'),
+     dash.dependencies.Input("date-range", 'end_date'),
+     dash.dependencies.Input("time-div", 'value'),
+     dash.dependencies.Input("route-match", "value")])
+def violin_plot(dummy, hours, start_date, end_date, time_div, route_match):
+    """Draw violin plot with different boroughs"""
+
+    # load historical data and add borough booleans
+    hist_df, hist_routes = get_selected_data(df, hours, start_date, end_date,
+                                             time_div)
+    days = (pd.to_datetime(end_date) - pd.to_datetime(start_date)).days
+
+    # load live data and add borough booleans
+    live_df = pd.read_csv("live.csv", index_col=0, parse_dates=True)
+
+    # get counts for all historical data
+    all_df, all_routes = get_vehicle_counts(hist_df, hours, start_date,
+                                            end_date, time_div)
+    all_counts = all_df.vehicle_count / days
+
+    if route_match == 1:
+        _, count_live, _ = match_routes(live_df, all_routes)
+    else:
+        _, count_live, _ = aggregate_live(live_df)
+
+    #  create point and violin across all boroughs
+    traces = [{"type": 'violin',
+               "x": ["All"] * all_counts.shape[0],
+               "y": all_counts,
+               "bandwidth": 20,
+               'name': "All",
+               'legendgroup':"All",
+               "showlegend": True,
+               "box": {"visible": True},
+               "meanline": {"visible": True}},
+
+              go.Scatter(x=["All"],
+                         y=[count_live],
+                         mode='markers',
+                         name='All',
+                         legendgroup="All",
+                         showlegend=False,
+                         marker={'size': 8})
+              ]
+
+    for it, col in enumerate(dic_borough.keys()):
+        if any(hist_df[col]):
+            # extracting items within certain borough
+            t_hist_df = hist_df[hist_df[col]]
+            # getting counts with specified time division and criteria
+            temp_df, temp_routes = get_vehicle_counts(t_hist_df, hours,
+                                                      start_date, end_date,
+                                                      time_div)
+
+            counts = temp_df.vehicle_count / days
+            violin = {"type": 'violin',
+                      "x": [dic_borough[col]] * counts.shape[0],
+                      "y": counts,
+                      "bandwidth": 20,
+                      'name': dic_borough[col],
+                      'legendgroup': dic_borough[col],
+                      "showlegend": True,
+                      "box": {"visible": True},
+                      "meanline": {"visible": True}}
+            traces.append(violin)
+
+            # want to match routes in case of live data so no discrepancy's
+            # other than increase service within those routes
+            if any(live_df[col]):
+                # extracting items within certain borough
+                t_live_df = live_df[live_df[col]]
+                # ensure in same routes
+                if route_match == 1:
+                    _, count, _ = match_routes(t_live_df, temp_routes)
+                else:
+                    _, count, _ = aggregate_live(t_live_df)
+
+                point = go.Scatter(x=[dic_borough[col]],
+                                   y=[count],
+                                   mode='markers',
+                                   name=dic_borough[col],
+                                   showlegend=False,
+                                   legendgroup=dic_borough[col],
+                                   marker={'size': 8})
+                traces.append(point)
+
+        # historic data may not include some boroughs that the live data does
+        else:
+            if any(live_df[col]):
+                # extracting items within certain borough
+                t_live_df = live_df[live_df[col]]
+                _, count, _ = aggregate_live(t_live_df)
+
+                point = go.Scatter(x=[dic_borough[col]],
+                                   y=[count],
+                                   mode='markers',
+                                   name=dic_borough[col],
+                                   legendgroup=dic_borough[col],
+                                   marker={'size': 8})
+                traces.append(point)
+
+    layout = go.Layout(title="Number of active vehicles per borough",
+                       titlefont=dict(size=30),
+                       height=400,
+                       xaxis=dict(title='Borough',
+                                  titlefont=dict(size=20),
+                                  tickfont=dict(size=15),
+                                  nticks=10,
+                                  tickformat="%H:%M"),
+                       yaxis=dict(title='Number of active vehicles',
+                                  titlefont=dict(size=20),
+                                  tickfont=dict(size=15)),
+                       legend=dict(font=dict(size=15)),
+                       hovermode='closest')
+    return {"data": traces, "layout": layout}
+
 
 if __name__ == '__main__':
     # create iterator
