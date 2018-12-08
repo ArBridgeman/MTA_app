@@ -49,6 +49,8 @@ timestamp = "%Y-%m-%d %H:%M:%S"
 df["timestamp"] = pd.to_datetime(df["timestamp"], format=timestamp)
 df["hour"] = df["timestamp"].dt.hour
 
+encoded_image = base64.b64encode(open("openstreetmap_nyc.png", 'rb').read())
+
 app.layout = html.Div([
 
     # creating sidebar
@@ -140,25 +142,25 @@ app.layout = html.Div([
 
               dcc.Graph(id='violin-plot', style={'padding-top': '30px'}),
 
-              #           html.P("Points (live data) and violins (historic data) are \
-              #             grouped in the legend by borough.",
-              # style={"font-size": '15', 'padding-left': '30px'}),
+              html.P("Points (live data) and violins (historic data) are \
+                          grouped in the legend by borough.",
+                     style={"font-size": '15', 'padding-left': '30px'}),
 
               html.Div([
-                  #               html.Div([dcc.Graph(id='graph-1')],
-                  # style={'textAlign': 'center', 'padding-top':
-                  # '30px'}),
+                  html.Div([dcc.Graph(id='graph-1')],
+                           style={'textAlign': 'center', 'padding-top':
+                                  '30px'}),
 
                   html.Div(dcc.Slider(id="show-me",
                                       min=0,
                                       max=24,
                                       value=0,
                                       marks={str(h): {'label': "%s:00" % h} for h in np.arange(0, 24, 1)}),
-                           style={'textAlign': 'center', 'width': "85%"})],
+                           style={'textAlign': 'center', 'width': "85%", 'padding-bottom': "60px"})],
                        style={'textAlign': 'center'})
               ],
              style={'width': "95%", 'display': 'inline-block',
-                    'textAlign': 'center', 'padding-left': '21%'},
+                    'textAlign': 'center', 'padding-left': '21%', 'padding-bottom': "60px"},
              className="six columns"
              )
 ])
@@ -521,6 +523,35 @@ viridis_cmap = cm.get_cmap('viridis')
 viridis = matplotlib_to_plotly(viridis_cmap, 255)
 # reset last one to be transparent
 viridis[-1] = [1.0, 'rgba(68, 1, 84, 0)']
+
+
+@app.callback(
+    dash.dependencies.Output('graph-1', 'figure'),
+    [dash.dependencies.Input('show-me', 'value')])
+def update_graph_1(value):
+
+    layout = dict(title="Daily activity of vehicles",
+                  titlefont=dict(size=30),
+                  xaxis=dict(range=[-74.30, -73.50], showticklabels=False),
+                  yaxis=dict(range=[40.5, 40.95], showticklabels=False),
+                  images=[dict(
+                      source='data:image/png;base64,{}'.format(
+                          encoded_image.decode()),
+                      xref="x",
+                      yref="y",
+                      x=-74.30,
+                      y=40.95,
+                      sizex=0.8,
+                      sizey=0.45,
+                      sizing="stretch",
+                      layer="below")],
+                  hovermode='closest',
+                  showlegend=False,
+                  width=1156,
+                  height=851
+                  )
+
+    return {'data': [], 'layout': layout}
 
 
 if __name__ == '__main__':
