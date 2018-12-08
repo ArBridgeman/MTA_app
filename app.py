@@ -136,30 +136,87 @@ app.layout = html.Div([
                'width': '20%', 'height':'100vh', 'position': 'fixed'},
         className="six columns"),
 
-    # html.Div([dcc.Graph(id='time-of-day-graph'),
+    html.Div([dcc.Graph(id='time-of-day-graph'),
 
-    #           dcc.Graph(id='violin-plot', style={'padding-top': '30px'}),
+              # dcc.Graph(id='violin-plot', style={'padding-top': '30px'}),
 
-    #           html.P("Points (live data) and violins (historic data) are \
-    #             grouped in the legend by borough.",
-    #                  style={"font-size": '15', 'padding-left': '30px'}),
+              #           html.P("Points (live data) and violins (historic data) are \
+              #             grouped in the legend by borough.",
+              # style={"font-size": '15', 'padding-left': '30px'}),
 
-    #           html.Div([
-    #               html.Div([dcc.Graph(id='graph-1')],
-    # style={'textAlign': 'center', 'padding-top': '30px'}),
+              #           html.Div([
+              #               html.Div([dcc.Graph(id='graph-1')],
+              # style={'textAlign': 'center', 'padding-top': '30px'}),
 
-    #               html.Div(dcc.Slider(id="show-me",
-    #                                   min=0,
-    #                                   max=24,
-    #                                   value=0,
-    #                                   marks={str(h): {'label': "%s:00" % h} for h in np.arange(0, 24, 1)}),
-    #                        style={'textAlign': 'center', 'width': "85%"})], style={'textAlign': 'center'})
-    #           ],
-    #          style={'width': "95%", 'display': 'inline-block',
-    #                 'textAlign': 'center', 'padding-left': '21%'},
-    #          className="six columns"
-    #          )
+              #               html.Div(dcc.Slider(id="show-me",
+              #                                   min=0,
+              #                                   max=24,
+              #                                   value=0,
+              #                                   marks={str(h): {'label': "%s:00" % h} for h in np.arange(0, 24, 1)}),
+              # style={'textAlign': 'center', 'width': "85%"})],
+              # style={'textAlign': 'center'})
+              ],
+             style={'width': "95%", 'display': 'inline-block',
+                    'textAlign': 'center', 'padding-left': '21%'},
+             className="six columns"
+             )
 ])
+
+# ---- used to load  and process live data ----
+
+
+def nyc_current():
+    """Request latests live feed"""
+
+    def _flatten_dict(root_key, nested_dict, flattened_dict):
+        """Flatten json file from MTA Bus Time API"""
+        for key, value in nested_dict.items():
+            next_key = root_key + "_" + key if root_key != "" else key
+            if isinstance(value, dict):
+                _flatten_dict(next_key, value, flattened_dict)
+            else:
+                flattened_dict[next_key] = value
+        return flattened_dict
+
+    params = {"key": "19faff8a-c061-4c7e-8dc4-63685ab24123",
+              "MaximumStopVisits": 2}
+
+    resp = requests.get("http://bustime.mta.info/api/siri/vehicle-monitoring.json",
+                        params=params).json()
+    info = resp['Siri']['ServiceDelivery'][
+        'VehicleMonitoringDelivery'][0]['VehicleActivity']
+    return pd.DataFrame([_flatten_dict('', i, {}) for i in info])
+
+
+@app.callback(
+    dash.dependencies.Output('button-clicks', 'children'),
+    [dash.dependencies.Input('button', 'n_clicks')])
+def clicks(n_clicks):
+    """Update live data when button clicked"""
+
+    if n_clicks is not None:
+        current = nyc_current()
+        sel_curr = current[['RecordedAtTime',
+                            'MonitoredVehicleJourney_VehicleRef',
+                            "MonitoredVehicleJourney_PublishedLineName",
+                            'MonitoredVehicleJourney_VehicleLocation_Latitude',
+                            'MonitoredVehicleJourney_VehicleLocation_Longitude']]
+        sel_curr = sel_curr.rename(index=str,
+                                   columns={
+                                       'RecordedAtTime': "timestamp",
+                                       'MonitoredVehicleJourney_VehicleRef': "vehicle_id",
+                                       "MonitoredVehicleJourney_PublishedLineName": "route_id",
+                                       'MonitoredVehicleJourney_VehicleLocation_Latitude': "latitude",
+                                       'MonitoredVehicleJourney_VehicleLocation_Longitude': "longitude"})
+        # put into timestamp into EST
+        sel_curr["timestamp"] = pd.to_datetime(sel_curr["timestamp"]) - \
+            pd.Timedelta(hours=4)
+        # get boolean columns for boroughs
+        sel_curr = create_boroughs(sel_curr)
+        sel_curr.to_csv("live.csv")
+        return 'Live data has been refreshed {} times'.format(n_clicks)
+    else:
+        return "Using last saved version of live data."
 
 
 if __name__ == '__main__':
