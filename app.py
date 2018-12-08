@@ -518,11 +518,76 @@ def matplotlib_to_plotly(cmap, pl_entries):
 
     return pl_colorscale
 
-# getting color map
-viridis_cmap = cm.get_cmap('viridis')
-viridis = matplotlib_to_plotly(viridis_cmap, 255)
-# reset last one to be transparent
-viridis[-1] = [1.0, 'rgba(68, 1, 84, 0)']
+
+def location_data():
+    """Load and processs location data"""
+
+    # --- load datasets ----
+    # historic data
+    hist_df = df.copy()
+
+    hist = hist_df.set_index("timestamp")
+
+    # create binned versions of latitude and longitude
+    hist["lats"] = pd.cut(hist.latitude, 15)
+    hist["longs"] = pd.cut(hist.longitude, 10)
+
+    # use grouper with timestamp index instead of resampler as can
+    # couple with latitutde and longitude from before
+    # get count of vehicles per day
+    group = hist.groupby([pd.Grouper(freq='15Min'), "lats", "longs"]).agg(
+        {"vehicle_id": "nunique"})
+    group = group.reset_index()
+
+    group["hhmmss"] = group["timestamp"].apply(lambda x: x.time())
+    # now group by time and take mean of vehicle count across days
+    group_hh = group.groupby(["hhmmss", "lats", "longs"], as_index=False).agg(
+        {"vehicle_id": 'mean'})
+    # get midpoints of lat and longs for heatmap
+    group_hh["lats"] = group_hh.lats.apply(lambda x: x.mid)
+    group_hh["longs"] = group_hh.longs.apply(lambda x: x.mid)
+
+    # creating easy objects to access for creating animated heatmap
+    groups = group_hh.groupby("hhmmss")
+
+    return groups, group_hh.vehicle_id.max()
+
+
+def location_trace(value):
+    group, max_val = location_data()
+
+    get_time = value.split(".")
+    if len(get_time) == 1:
+        key = datetime.time(int(get_time[0]), 0)
+    else:
+        key = datetime.time(int(get_time[0]), int(
+            float("0." + get_time[1]) * 60))
+    try:
+        sel = group.get_group(key)
+
+        # getting color map
+        viridis_cmap = cm.get_cmap('viridis')
+        viridis = matplotlib_to_plotly(viridis_cmap, 255)
+        # reset last one to be transparent
+        viridis[-1] = [1.0, 'rgba(68, 1, 84, 0)']
+
+        data_plot = [dict(type='heatmap',
+                          x=sel.longs,
+                          y=sel.lats,
+                          z=sel.vehicle_id,
+                          zmin=2,
+                          zmax=max_val,
+                          opacity=0.5,
+                          zsmooth='best',
+                          colorbar=dict(thickness=20, ticklen=4),
+                          colorscale=viridis,
+                          reversescale=True
+                          )]
+        return data_plot
+
+    except:
+
+        return []
 
 
 @app.callback(
@@ -551,7 +616,7 @@ def update_graph_1(value):
                   height=851
                   )
 
-    return {'data': [], 'layout': layout}
+    return {'data': location_trace(str(value)), 'layout': layout}
 
 
 if __name__ == '__main__':
